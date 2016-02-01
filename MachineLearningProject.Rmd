@@ -1,0 +1,282 @@
+---
+title: "PRACTICAL MACHINE LEARNING - WEIGHT LIFTING ASSESSMENTS"
+author: "Todd Sobiech"
+date: "Sunday, January 31, 2016"
+---
+
+
+####Project Description
+Six test participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways.
+Data was collected from accelerometers on the belt, forearm, arm, and dumbell of each participant. 
+
+Six young health participants were asked to perform one set of 10 repetitions of the Unilateral Dumbbell
+Biceps Curl in five different fashions: exactly according to the specification 
+(Class A)  exactly according to the specification
+(Class B)  throwing the elbows to the front 
+(Class C)  lifting the dumbbell only halfway 
+(Class D)  lowering the dumbbell only halfway 
+(Class E)  throwing the hips to the front 
+
+More information is available from the website: http://groupware.les.inf.puc-rio.br/har
+
+
+
+####Project Goal
+Predict how they complated the exercise from 5 possible outcomes(classes)
+
+
+
+####Data Overview
+There are two datasets.
+
+Training Data - consisting of 19,622 records and 160 variables
+Testing Data  - consiting of 20 records and 160 variables
+
+The target variable is defined as "Classe" within the training data
+
+
+####STEP 1 - LOAD THE DATA
+The data for this analysis was loaded from the following locations:
+Training - http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+Testing  - http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+```{r}
+rm(list = ls())
+if (!file.exists("pml-training.csv")) {
+  download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "pml-training.csv")
+}
+if (!file.exists("pml-testing.csv")) {
+  download.file("http://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "pml-testing.csv")
+}
+```
+
+####Step 2 - Process the data
+Assign the datasets to a dataframe.  Set blank records to "NA"
+
+```{r}
+traindata <- read.csv("pml-training.csv", sep = ",", na.strings = c("", "NA"))
+testdata <- read.csv("pml-testing.csv", sep = ",", na.strings = c("", "NA")) 
+```
+
+
+####Step 3 - Examine the data
+
+```{r}
+dim(traindata)  #19622, 160
+summary(traindata$classe)
+#summary(traindata)
+dim(testdata)  #20, 160
+#str(testdata)
+```
+
+There are 19,622 records in the training data.  There are 160 variables and many do not contain data.
+The variables missing data do not provide value to the prediction exercise in this case and should be removed.
+The values of the classifications are pretty evenly split across classes (B-E) while class A has the highest value.
+
+
+####Step 4 - Remove the variables containing NO data
+There are 159 variables available to use for building the prediction model.  However, many of these variables
+do not contain any data and are going to be removed.
+
+```{r}
+na_traindata = sapply(traindata, function(x) {sum(is.na(x))})
+#na_traindata
+table(na_traindata)  #19216
+```
+
+
+There are 100 variables with almost all missing values. These variables were removed
+
+
+```{r}
+missing_columns = names(na_traindata[na_traindata==19216])
+traindata2 = traindata[, !names(traindata) %in% missing_columns]
+#str(traindata2)
+dim(traindata2)  #19622,60
+```
+
+
+After removing the variables with no data, 60 variables are remaining in the training data for use
+for analysis
+
+
+####Step 5 - Prepare the R Instance 
+Ensure all packages that will be needed for the analysis are referenced
+
+```{r warning=FALSE,message=FALSE}
+Sys.info()[1:2]
+R.version.string
+getwd()
+
+#install.packages('caret', dependencies = TRUE)
+#install.packages("AppliedPredictiveModeling")
+#install.packages("rattle")
+#install.packages("rpart.plot")
+#install.packages("randomForest")
+#install.packages("ggthemes")
+#install.packages("gridExtra")
+#install.packages("ggplot2")
+#install.packages("grid")
+
+library(caret)
+library(AppliedPredictiveModeling)
+library(rattle)
+library(rpart.plot)
+library(randomForest)
+library(ggthemes)
+library(gridExtra)
+library(ggplot2)
+library(grid)
+```
+
+
+
+####Step 6 - Partition the Data
+Seperate the training dataset into two groups.  One group consisting of 75% of the records to be
+used to build the model and 25% of the records to test the model as assess fit.
+
+```{r}
+set.seed(1234)
+inTrain = createDataPartition(traindata2$classe, p = 0.75, list = F)
+#inTrain
+training = traindata2[inTrain,]
+testing = traindata2[-inTrain,]
+```
+
+
+The first 7 columns of the training data was removed because these variables do not provide relevant
+content to aid in building the model
+
+
+```{r}
+training = training[,-c(1:7)]
+#str(training)
+dim(training)
+dim(testing)
+```
+
+The training group contains 14,718 records and 53 variables.
+The testing groupp contains 4,904 variables.
+
+
+
+####Step 7 - Identify Important Variables
+Using random forest, the most important variables related to the target variable "Classe" are identified.
+
+```{r, cache = TRUE}
+#fsRF = randomForest(training[,-outcome], training[,outcome], importance = T)
+fsRF = randomForest(training, training$classe, importance = T)
+#fsRF
+rfImp = data.frame(fsRF$importance)
+#head(rfImp[order(rfImp$MeanDecreaseGini,decreasing=TRUE), ],20)
+rfImp2<-head(rfImp[order(rfImp$MeanDecreaseGini,decreasing=TRUE), ],20)
+rfImp2[c(7)]
+#getTree(fsRF,1)
+```
+
+Based on the Mean Dcrease of the Gini, the roll_belt, yaw_belt, pitch_forearm, pitch_belt and 
+magnet_Dumbbell_y are the most important variables.
+
+
+####Step 8 - Construct Predictive Models
+
+Two models were selected to fit to the training data.  A forest and trees model using 3 fold cross validation and a decision tree using the rpart function
+
+```{r, cache = TRUE}
+#Nearest Neighbor
+#ctrlKNN = trainControl(method = "adaptive_cv")
+#modelKNN = train(classe ~ ., training, method = "knn", trControl = ctrlKNN)
+#resultsKNN = data.frame(modelKNN$results)
+
+#Random Forest
+#ctrlRF = trainControl(method = "oob")
+#modelRF = train(classe ~ ., training, method = "rf", ntree = 200, trControl = ctrlRF)
+#resultsRF = data.frame(modelRF$results)
+
+#Random Forest 2
+# instruct train to use 3-fold CV to select optimal tuning parameters
+fitControl <- trainControl(method="cv", number=3, verboseIter=F)
+# fit model
+fit <- train(classe ~ ., data=training, method="rf", trControl=fitControl)
+fit$finalModel
+plot(fit$finalModel)
+plot(fit)
+
+
+#Randome Forest 3
+#set.seed(1777)
+#random_forest=randomForest(classe~.,data=training,ntree=500,importance=TRUE)
+#random_forest
+#plot(random_forest,main="Random Forest: Error Rate vs Number of Trees")
+
+#model = train(classe~., method="rf", data=training)
+#saveRDS(model, "rfmodel.RDS")
+#model = readRDS("rfmodel.RDS")
+
+
+#R Part Decision Tree
+ModelDecT <- rpart(classe ~ ., data=training, method="class")
+```
+
+The forest and Trees model was selected.  The missclassification rate is less than 1%.  
+The error rate of the model flattened at around 100 decision trees
+The accuracy of the model was maximized with around 28 variables
+
+
+####Step 9 - Assess the Models and Select the best model
+
+```{r, cache = TRUE}
+#K Nearest Neighbor
+#fitKNN = predict(modelKNN, testing)
+#mean(fitKNN != testing$classe)  ##Misclassification rate #8.4%
+#confusionMatrix(testing$classe, fitKNN)
+
+#Random Forest 1
+#fitRF = predict(modelRF, testing)
+#mean(fitRF != testing$classe)  ##Misclassification rate 
+#confusionMatrix(testing$classe, fitRF)
+
+#Random Forest 2 - with cross validation
+fitRF2 = predict(fit, newdata=testing)
+mean(fitRF2 != testing$classe)  ##Misclassification rate  #.007%
+confusionMatrix(testing$classe, fitRF2)
+
+#Decision Tree
+fitDecT1 = predict(ModelDecT, newdata=testing, type = "class")
+mean(fitDecT1 != testing$classe)  ##Misclassification rate  #24.7%
+confusionMatrix(testing$classe, fitDecT1)
+```
+
+
+
+####Step 10 - Make Model Predictions
+```{r, cache = TRUE}
+# Make Predictions on the 20 test set records
+preds <- predict(fit, newdata=testdata)
+
+# convert predictions to character vector
+preds <- as.character(preds)
+
+# create function to write predictions to files
+pml_write_files <- function(x) {
+  n <- length(x)
+  for(i in 1:n) {
+    filename <- paste0("problem_id_", i, ".txt")
+    write.table(x[i], file=filename, quote=F, row.names=F, col.names=F)
+  }
+}
+
+# create prediction files to submit
+pml_write_files(preds)
+preds
+```
+
+The model was 100% accurate on the 20 rows from the test data
+
+
+####CONCLUSION
+
+A 3-fold cross validation Forest and Trees model was selected as the final model.
+The estimated out of sample missclassification error is only .007%% (1 - testing accuracy). 
+
+
